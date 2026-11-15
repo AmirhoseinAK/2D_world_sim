@@ -1,0 +1,23 @@
+"""Constants: tiles, colors, FPS."""
+
+TILE = 32
+ROOM_W = 15
+ROOM_H = 10
+HUD_H = 110
+WINDOW_W = ROOM_W * TILE
+WINDOW_H = ROOM_H * TILE + HUD_H
+FPS = 60
+
+# Colors
+COLOR_FLOOR       = (225, 225, 228)
+COLOR_WALL        = (48, 48, 55)
+COLOR_WALL_EDGE   = (32, 32, 38)
+COLOR_DOOR        = (80, 200, 120)
+COLOR_DOOR_GLOW   = (150, 255, 180)
+COLOR_PLAYER      = (60, 110, 220)
+COLOR_PLAYER_RING = (30, 60, 130)
+COLOR_HUD_BG      = (24, 24, 30)
+COLOR_HUD_TEXT    = (240, 240, 240)
+COLOR_HUD_DIM     = (140, 140, 150)
+COLOR_MSG_GOOD    = (150, 255, 180)
+COLOR_MSG_WARN    = (240, 200, 120)

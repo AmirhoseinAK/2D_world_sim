@@ -1,0 +1,17 @@
+llm:
+  base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  api_key_env: "GEMINI_API_KEY"
+  model: "gemini-3.5-flash"
+  temperature: 0.8
+  max_tokens: 2000
+  timeout: 60
+
+game:
+  language: "en"
+  save_dir: "saves"
+  max_history: 20
+  max_rooms: 12
+
+map2d:
+  tile_size: 32
+  fps: 60

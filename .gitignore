@@ -1,0 +1,44 @@
+# === Secrets ===
+.env
+.env.local
+*.key
+*.pem
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# === Virtual envs ===
+.venv/
+venv/
+ENV/
+env/
+
+# === Game saves ===
+saves/*.json
+saves/*.json.bak
+!saves/.gitkeep
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Logs / temp ===
+*.log
+_test_llm.py
+_check_env.py
