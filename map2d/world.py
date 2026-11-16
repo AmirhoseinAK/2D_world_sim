@@ -1,4 +1,4 @@
-"""Room graph with tree depth: street(0) -> building(1) -> room(2)."""
+"""Room graph with tree depth + save/load serialization."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -24,6 +24,7 @@ class World:
         self.last_message_color = (240, 240, 240)
         self.enter_room(start_room)
 
+    # ---------- core API ----------
     @property
     def current(self) -> dict:
         return self.rooms[self.current_id]
@@ -105,6 +106,28 @@ class World:
 
         return pos, None
 
+    # ---------- serialization ----------
+    def to_dict(self) -> dict:
+        return {
+            "current_id": self.current_id,
+            "_dynamic_counter": self._dynamic_counter,
+            "rooms": {rid: _room_to_dict(r) for rid, r in self.rooms.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "World":
+        world = cls.__new__(cls)
+        world._templates = ROOMS
+        world.current_id = data.get("current_id", "hospital_lobby")
+        world._dynamic_counter = int(data.get("_dynamic_counter", 0))
+        world.last_message = "Loaded"
+        world.last_message_color = (150, 255, 180)
+        world.rooms = {}
+        for rid, rdata in data.get("rooms", {}).items():
+            world.rooms[rid] = _room_from_dict(rdata)
+        return world
+
+    # ---------- private ----------
     def _build_from_template(self, room_id: str) -> dict:
         template = self._templates[room_id]
         room = deepcopy(template)
@@ -125,6 +148,7 @@ class World:
         room.setdefault("npcs", [])
         room.setdefault("depth", 0)
         room.setdefault("label", room_id.replace("_", " ").title())
+        room.setdefault("is_dynamic", False)
         return room
 
     @staticmethod
@@ -190,3 +214,97 @@ class World:
                 continue
             return pos
         return None
+
+
+# =============================================================
+# Serialization helpers
+# =============================================================
+def _room_to_dict(room: dict) -> dict:
+    out = {}
+    for k, v in room.items():
+        # Skip template-only data that doesn't survive JSON
+        # (template "doors" has tuple keys; "map" is not needed after build)
+        if k in ("doors", "map"):
+            continue
+        if k == "walls":
+            out[k] = [[x, y] for (x, y) in v]
+        elif k == "parsed_doors":
+            out[k] = {
+                f"{p[0]},{p[1]}": _door_to_dict(d) for p, d in v.items()
+            }
+        elif k == "size":
+            out[k] = list(v)
+        elif k == "player_spawn":
+            out[k] = list(v)
+        elif k == "objects":
+            out[k] = [
+                {"pos": list(o["pos"]), "color": list(o["color"])}
+                for o in v
+            ]
+        elif k == "npcs":
+            out[k] = [_npc_to_dict(n) for n in v]
+        else:
+            out[k] = v
+    return out
+
+
+def _door_to_dict(d: dict) -> dict:
+    out = dict(d)
+    if "spawn_at" in out and isinstance(out["spawn_at"], tuple):
+        out["spawn_at"] = list(out["spawn_at"])
+    return out
+
+
+def _npc_to_dict(npc: dict) -> dict:
+    return {
+        "name": npc["name"],
+        "role": npc["role"],
+        "pos": list(npc["pos"]),
+        "color": list(npc["color"]),
+        "personality": npc.get("personality", ""),
+        "conversation_log": [dict(e) for e in npc.get("conversation_log", [])],
+    }
+
+
+def _room_from_dict(data: dict) -> dict:
+    room = {}
+    for k, v in data.items():
+        if k == "walls":
+            room[k] = {(int(x), int(y)) for (x, y) in v}
+        elif k == "parsed_doors":
+            room[k] = {
+                (int(p.split(",")[0]), int(p.split(",")[1])): _door_from_dict(d)
+                for p, d in v.items()
+            }
+        elif k == "size":
+            room[k] = tuple(v)
+        elif k == "player_spawn":
+            room[k] = tuple(v)
+        elif k == "objects":
+            room[k] = [
+                {"pos": tuple(o["pos"]), "color": tuple(o["color"])}
+                for o in v
+            ]
+        elif k == "npcs":
+            room[k] = [_npc_from_dict(n) for n in v]
+        else:
+            room[k] = v
+    return room
+
+
+def _door_from_dict(d: dict) -> dict:
+    out = dict(d)
+    if "spawn_at" in out and isinstance(out["spawn_at"], list):
+        out["spawn_at"] = tuple(out["spawn_at"])
+    return out
+
+
+def _npc_from_dict(npc: dict) -> dict:
+    return {
+        "name": npc["name"],
+        "role": npc["role"],
+        "pos": tuple(npc["pos"]),
+        "color": tuple(npc["color"]),
+        "personality": npc.get("personality", ""),
+        "conversation_log": list(npc.get("conversation_log", [])),
+    }

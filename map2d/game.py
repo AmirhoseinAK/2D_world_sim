@@ -1,4 +1,4 @@
-"""Main pygame loop with NPC support, threaded LLM calls, held-backspace."""
+"""Main pygame loop with NPC, LPC character sprites, threaded LLM, save."""
 import sys
 import textwrap
 
@@ -26,9 +26,10 @@ INPUT_BOX_Y = WINDOW_H - INPUT_BOX_H - 8
 INPUT_BOX_X = 8
 INPUT_BOX_W = WINDOW_W - 16
 
-# Delete-repeat tuning
 BACKSPACE_INITIAL_DELAY = 0.35
 BACKSPACE_REPEAT_INTERVAL = 0.03
+
+HUD_SAVE_BTN = pygame.Rect(WINDOW_W - 60, 6, 54, 24)
 
 P_BIRTH_LOADING = "birth_loading"
 P_BIRTH_OVERLAY = "birth_overlay"
@@ -41,7 +42,38 @@ P_DIALOGUE = "dialogue"
 P_DIALOGUE_THINKING = "dialogue_thinking"
 
 
-def run(cfg=None):
+def _draw_hud_buttons(screen):
+    font = pygame.font.SysFont("Arial", 11, bold=True)
+    mx, my = pygame.mouse.get_pos()
+    rect = HUD_SAVE_BTN
+    hover = rect.collidepoint(mx, my)
+    bg = (60, 120, 180, 220) if hover else (30, 60, 100, 180)
+    s = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+    s.fill(bg)
+    screen.blit(s, rect.topleft)
+    pygame.draw.rect(screen, (120, 180, 240), rect, 1)
+    text = font.render("Save", True, (240, 240, 240))
+    screen.blit(text, text.get_rect(center=rect.center))
+
+
+def _apply_loaded_game(state, data, player):
+    for k, v in data.get("state", {}).items():
+        if hasattr(state, k):
+            setattr(state, k, v)
+    new_world = World.from_dict(data.get("world", {}))
+    p = data.get("player", {})
+    player.x = float(p.get("x", player.x))
+    player.y = float(p.get("y", player.y))
+    lt = data.get("last_tile")
+    if lt:
+        last_tile = (int(lt[0]), int(lt[1]))
+    else:
+        last_tile = player.center_tile()
+    player.sprite_id = getattr(state, "sprite", "male_01")
+    return new_world, last_tile
+
+
+def run(cfg=None, loaded_data=None):
     if cfg is None:
         cfg = load_config()
     llm = LLMClient(cfg.llm)
@@ -69,25 +101,32 @@ def run(cfg=None):
 
     world = World(start_room="hospital_lobby")
     sx, sy = world.current["player_spawn"]
-    player = Player(sx, sy)
+    player = Player(sx, sy, state.sprite)
     last_tile = player.center_tile()
 
     birth_task = LLMTask()
     turn_task = LLMTask()
     npc_task = LLMTask()
-    birth_task.start(parse_birth, llm, state)
 
-    phase = P_BIRTH_LOADING
+    if loaded_data:
+        world, last_tile = _apply_loaded_game(state, loaded_data, player)
+        phase = P_IDLE
+        message = "Game loaded."
+        message_color = COLOR_MSG_GOOD
+    else:
+        birth_task.start(parse_birth, llm, state)
+        phase = P_BIRTH_LOADING
+        message = ""
+        message_color = COLOR_HUD_TEXT
+
     overlay_text = ""
     overlay_can_dismiss_at = 0.0
-    transition_lock = 0.0
+    transition_lock = 0.3 if loaded_data else 0.0
     LOCK_TIME = 0.30
     typing = False
     text_buffer = ""
-    message = ""
-    message_color = COLOR_HUD_TEXT
     max_rooms = cfg.game.max_rooms
-    death_shown = False
+    death_shown = (not state.alive) if loaded_data else False
     current_npc = None
     _pending_phase = [P_IDLE]
     _pending_overlay = [""]
@@ -99,13 +138,21 @@ def run(cfg=None):
         dt = min(clock.tick(FPS) / 1000.0, 0.05)
         now = pygame.time.get_ticks() / 1000.0
 
-        # ================= EVENTS =================
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
                 break
 
-            # Clear backspace hold on release
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and phase == P_IDLE:
+                mx, my = event.pos
+                if HUD_SAVE_BTN.collidepoint(mx, my):
+                    from .save_load_ui import run_save_dialog
+                    saved = run_save_dialog(screen, state, world, player, last_tile)
+                    if saved:
+                        message = "Game saved."
+                        message_color = COLOR_MSG_GOOD
+                    continue
+
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_BACKSPACE:
                     backspace_hold_started = None
@@ -114,7 +161,6 @@ def run(cfg=None):
             if event.type != pygame.KEYDOWN:
                 continue
 
-            # ----- Overlays -----
             if phase in (P_BIRTH_OVERLAY, P_ACT_OVERLAY, P_ENTRY_OVERLAY, P_DEATH_OVERLAY):
                 if now >= overlay_can_dismiss_at:
                     if phase == P_DEATH_OVERLAY:
@@ -124,11 +170,12 @@ def run(cfg=None):
                         transition_lock = 0.2
                 continue
 
-            # ----- Birth loading -----
             if phase == P_BIRTH_LOADING:
                 if event.key == pygame.K_ESCAPE:
                     state.name = "Alex"
                     state.city = state.country
+                    state.sprite = "male_01" if state.gender == "male" else "female_01"
+                    player.sprite_id = state.sprite
                     overlay_text = (
                         f"You are born in {state.country}. Three years pass.\n\n"
                         "(Skipped.)\n\nPress any key to begin."
@@ -137,14 +184,12 @@ def run(cfg=None):
                     phase = P_BIRTH_OVERLAY
                 continue
 
-            # ----- Thinking -----
             if phase == P_THINKING:
                 if event.key == pygame.K_ESCAPE:
                     message = "Please wait for the response..."
                     message_color = COLOR_MSG_WARN
                 continue
 
-            # ----- Dialogue input -----
             if phase == P_DIALOGUE:
                 if event.key == pygame.K_ESCAPE:
                     current_npc = None
@@ -172,14 +217,20 @@ def run(cfg=None):
                         text_buffer += event.unicode
                 continue
 
-            # ----- Dialogue thinking -----
             if phase == P_DIALOGUE_THINKING:
                 if event.key == pygame.K_ESCAPE:
                     message = "Please wait..."
                     message_color = COLOR_MSG_WARN
                 continue
 
-            # ================= IDLE =================
+            if event.key == pygame.K_F5:
+                from .save_load_ui import run_save_dialog
+                saved = run_save_dialog(screen, state, world, player, last_tile)
+                if saved:
+                    message = "Game saved."
+                    message_color = COLOR_MSG_GOOD
+                continue
+
             if event.key == pygame.K_ESCAPE:
                 if typing:
                     typing = False
@@ -234,16 +285,13 @@ def run(cfg=None):
         if not running:
             break
 
-        # ================= BACKSPACE HOLD REPEAT =================
         if backspace_hold_started is not None:
-            elapsed = now - backspace_hold_started
-            if elapsed > BACKSPACE_INITIAL_DELAY:
+            if now - backspace_hold_started > BACKSPACE_INITIAL_DELAY:
                 if now - backspace_last_tick >= BACKSPACE_REPEAT_INTERVAL:
                     if (phase == P_DIALOGUE) or (phase == P_IDLE and typing):
                         text_buffer = text_buffer[:-1]
                     backspace_last_tick = now
 
-        # ================= TASKS =================
         birth_task.update()
         turn_task.update()
         npc_task.update()
@@ -252,16 +300,22 @@ def run(cfg=None):
             if birth_task.timed_out or birth_task.error:
                 state.name = "Alex"
                 state.city = state.country
+                state.sprite = "male_01" if state.gender == "male" else "female_01"
+                player.sprite_id = state.sprite
                 overlay_text = f"You are born in {state.country}. Three years pass."
             else:
                 try:
-                    name, city, narrative = birth_task.result
+                    name, city, sprite, narrative = birth_task.result
                     state.name = name
                     state.city = city
+                    state.sprite = sprite
+                    player.sprite_id = sprite
                     overlay_text = narrative
                 except Exception:
                     state.name = "Alex"
                     state.city = state.country
+                    state.sprite = "male_01" if state.gender == "male" else "female_01"
+                    player.sprite_id = state.sprite
                     overlay_text = f"You are born in {state.country}. Three years pass."
             overlay_text += "\n\nPress any key to begin."
             overlay_can_dismiss_at = now + 0.4
@@ -303,7 +357,6 @@ def run(cfg=None):
             overlay_can_dismiss_at = now + 0.4
             phase = P_DEATH_OVERLAY
 
-        # ================= MOVEMENT =================
         transition_lock = max(0.0, transition_lock - dt)
         if phase == P_IDLE and not typing and state.alive:
             keys = pygame.key.get_pressed()
@@ -323,7 +376,6 @@ def run(cfg=None):
                 )
                 player.try_move(dx, dy, dt, blocked)
 
-        # ================= DOOR =================
         if phase == P_IDLE and transition_lock <= 0.0 and state.alive:
             tile = player.center_tile()
             if tile != last_tile:
@@ -347,7 +399,6 @@ def run(cfg=None):
                 else:
                     last_tile = tile
 
-        # ================= DRAW =================
         if phase == P_BIRTH_LOADING:
             _draw_center_loading(screen, font_center, "Creating your life", birth_task.elapsed())
         elif phase in (P_DIALOGUE, P_DIALOGUE_THINKING):
@@ -439,7 +490,8 @@ def _draw_game(screen, world, player, state, font_big, font_sm, font_input,
     screen.fill(COLOR_HUD_BG)
     draw_room(screen, world.current)
     draw_npcs(screen, world.current, player, highlight_npc=near_npc)
-    draw_player(screen, player)
+    draw_player(screen, player, state.age)   # ← age passed
+    _draw_hud_buttons(screen)
 
     hud_y = ROOM_H * TILE
     pygame.draw.rect(screen, COLOR_HUD_BG, (0, hud_y, WINDOW_W, HUD_H))
@@ -450,7 +502,7 @@ def _draw_game(screen, world, player, state, font_big, font_sm, font_input,
 
     depth = world.current_depth()
     badge = {0: "[street]", 1: "[building]"}.get(depth, "[room]")
-    loc = f"{world.current_label()} {badge} | job: {state.job}"
+    loc = f"{world.current_label()} {badge} | F5 = save"
     screen.blit(font_sm.render(loc, True, COLOR_HUD_DIM), (12, hud_y + 26))
 
     if near_npc and not typing:
@@ -479,7 +531,7 @@ def _draw_dialogue(screen, world, player, state, npc,
     screen.fill(COLOR_HUD_BG)
     draw_room(screen, world.current)
     draw_npcs(screen, world.current, player, highlight_npc=npc)
-    draw_player(screen, player)
+    draw_player(screen, player, state.age)   # ← age passed
 
     rect = pygame.Rect(20, 20, WINDOW_W - 40, ROOM_H * TILE - 40)
     s = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
@@ -494,15 +546,17 @@ def _draw_dialogue(screen, world, player, state, npc,
                 (rect.x + 12, rect.y + 30))
 
     y = rect.y + 56
-    for entry in npc.get("conversation_log", [])[-5:]:
+    log_entries = npc.get("conversation_log", [])[-3:]
+    chars = max(30, (rect.w - 24) // 7)
+    for entry in log_entries:
         speaker = npc["name"] if entry["role"] == "npc" else state.name
-        text = f"{speaker}: {entry['text']}"
-        chars = max(30, (rect.w - 24) // 7)
-        for line in textwrap.wrap(text, width=chars)[:2]:
-            screen.blit(font_overlay.render(line, True, COLOR_HUD_TEXT),
+        color = (255, 230, 100) if entry["role"] == "npc" else (180, 220, 255)
+        lines = textwrap.wrap(f"{speaker}: {entry['text']}", width=chars)
+        for line in lines[:6]:
+            screen.blit(font_overlay.render(line, True, color),
                         (rect.x + 12, y))
-            y += 18
-        y += 2
+            y += 17
+        y += 3
 
     if thinking:
         dots = "." * (int(elapsed * 3) % 4)

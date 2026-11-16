@@ -20,11 +20,12 @@ def parse_birth(llm: LLMClient, state):
     data = extract_json(raw) or {}
     name = str(data.get("name") or "Alex")[:30]
     city = str(data.get("city") or state.country)[:30]
+    sprite = str(data.get("sprite") or "male_01")[:12]
     narrative = str(
         data.get("narrative")
         or f"You are born in {state.country}. Three years pass."
     )
-    return name, city, narrative
+    return name, city, sprite, narrative
 
 
 def parse_turn(

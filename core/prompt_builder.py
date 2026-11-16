@@ -7,17 +7,28 @@ from map2d.object_types import ALLOWED_OBJECT_TYPES
 def build_birth_prompt(state) -> str:
     return f"""The player is born. Respond with JSON only, nothing else.
 
-STARTING FACTS:
+FACTS:
 - Country: {state.country}
 - Gender: {state.gender}
 - Family wealth: {state.family_wealth}
 - Family type: {state.family_type}
 
-Return exactly this JSON shape:
+AVAILABLE SPRITE (pick one):
+- If gender is "male":   male_01, male_02, male_03, male_04, male_05, male_06
+- If gender is "female": female_01, female_02, female_03, female_04, female_05, female_06
+
+Choose the sprite that best matches the country of birth. Examples:
+- Iran, India, Egypt -> _02 or _03 (tanned/dark)
+- Japan, Korea, Germany -> _01 (light)
+- Nigeria, Kenya -> _05 or _06 (dark)
+Vary your choice; do not always pick _01.
+
+Return exactly:
 {{
   "name": "<a single first name appropriate for {state.country} and {state.gender}>",
   "city": "<a plausible city in {state.country}>",
-  "narrative": "<3 short sentences in 2nd person, present tense, describing birth sensations only. End with: Three years pass.>"
+  "sprite": "<one of the IDs above>",
+  "narrative": "<3 short sentences, 2nd person 'you', birth sensations only. End with: Three years pass.>"
 }}
 """
 
@@ -72,7 +83,7 @@ def build_turn_prompt(
     return f"""You classify player intent and (if go) design a room. Output JSON only.
 
 CURRENT:
-- Character: {state.name} ({state.gender}, {state.age}y)
+- Character: {state.name} ({state.gender}, {state.age}y, health {state.health})
 - Location: "{room_label}" (depth {depth}) — objects: {obj_desc}
 - Free door directions: {free_str}
 - Occupied: {occupied or ['none']}
@@ -104,7 +115,7 @@ CLASSIFY the player intent, then output EXACTLY ONE of the three shapes.
       }}
     ]
   }},
-  "deltas": {{"age": 0, "summary": "<short third-person>"}}
+  "deltas": {{"age": <int>, "summary": "<short third-person>"}}
 }}
 
 ===== SHAPE B: "act" (something happens in current room) =====
@@ -112,7 +123,7 @@ CLASSIFY the player intent, then output EXACTLY ONE of the three shapes.
   "intent": "act",
   "narrative": "<2-4 sentences, 2nd person 'you', present tense>",
   "deltas": {{
-    "age": 0 or 1,
+    "age": <int>,
     "health": <int -5..+5>,
     "money": <int -20..+20>,
     "summary": "<short third-person>"
@@ -128,41 +139,36 @@ CLASSIFY the player intent, then output EXACTLY ONE of the three shapes.
 ALLOWED OBJECT TYPES: {allowed}
 ROOM GRID: 15 wide x 10 tall. Coordinates x in [1,13], y in [1,8].
 
-NPC RULES:
-- A room may have 0 to 3 NPCs. Add 1-2 for lively places.
-  * restaurant/cafe -> a waiter, a cook, or a customer
-  * shop -> a shopkeeper
-  * hospital/ward -> a nurse, a doctor
-  * school -> a teacher, a student
-  * park -> a stranger, a child
-  * house -> a family member
-- NPC "color" should suit their role:
-  nurse (240,240,250), doctor (200,220,240), cook (220,180,140),
-  shopkeeper (220,200,150), stranger (180,180,180), child (240,220,180).
-- NPC "personality" is ONE short line, e.g. "tired but kind".
+=====  AGE RULE (VERY IMPORTANT)  =====
+The character is currently {state.age} years old.
+
+- Routine action (eat, talk, walk around, look at something): age = 0
+- Meaningful action (learn a skill, do something new, meet someone important): age = 0 or 1
+- Explicit time skip in the PLAYER INTENT (the player literally writes
+  things like "years pass", "a decade later", "I grow up", "I am now
+  an adult", "I wait until I am 30"): set age to the FULL amount
+  (e.g. "I am now 20" from age 3 -> age = 17).
+- NEVER invent large age jumps on your own. Only when the player
+  explicitly asks for a time skip.
+
+=====  NPC RULES  =====
+- A room may have 0 to 3 NPCs.
+- NPC "color" should suit their role.
 - NPC "pos" must be free (not on wall or object).
 
-===== FEW-SHOT EXAMPLES =====
+=====  FEW-SHOT EXAMPLES  =====
 
 Player at depth 0 (street) says: "I want to eat at a restaurant"
 {{"intent":"go","direction":"east","label":"Bella's Restaurant","message":"A warm door opens to the east.","entry_narrative":"You step inside. The smell of garlic and fresh bread greets you. Soft light warms the air.","room_spec":{{"floor_color":[210,180,140],"wall_color":[80,50,30],"objects":[{{"type":"table","x":4,"y":3}},{{"type":"chair","x":4,"y":4}},{{"type":"table","x":8,"y":3}},{{"type":"chair","x":8,"y":4}},{{"type":"counter","x":11,"y":5}}],"npcs":[{{"name":"Bella","role":"cook","pos":[11,6],"color":[220,180,140],"personality":"warm and loud, always busy"}}]}},"deltas":{{"age":0,"summary":"Found a restaurant on the street."}}}}
 
-Player at depth 0 (street) says: "I want to buy something"
-{{"intent":"go","direction":"south","label":"Small Shop","message":"A door slides open to the south.","entry_narrative":"You enter a cluttered shop. Shelves line the walls, and a small bell chimes as you step in.","room_spec":{{"floor_color":[220,220,200],"wall_color":[60,60,60],"objects":[{{"type":"shelf","x":3,"y":2}},{{"type":"shelf","x":5,"y":2}},{{"type":"counter","x":7,"y":7}},{{"type":"crate","x":11,"y":3}}],"npcs":[{{"name":"Omar","role":"shopkeeper","pos":[7,6],"color":[220,200,150],"personality":"quiet, watches customers closely"}}]}},"deltas":{{"age":0,"summary":"Entered a small shop."}}}}
-
-Player at depth 1 (restaurant) says: "I want to use the bathroom"
-{{"intent":"go","direction":"north","label":"Bathroom","message":"A narrow door opens to the north.","entry_narrative":"You step into a small tiled room. The air is cool and smells faintly of soap.","room_spec":{{"floor_color":[200,220,220],"wall_color":[150,150,150],"objects":[],"npcs":[]}},"deltas":{{"age":0,"summary":"Used the bathroom."}}}}
-
-Player at depth 1 (restaurant) says: "I want to see the hospital"
-{{"intent":"reject","message":"You need to go back outside first."}}
-
 Player at depth 0 (street) says: "I cry"
 {{"intent":"act","narrative":"Your tears fall on the pavement. A passerby glances at you but keeps walking. The cold wind stings your cheeks.","deltas":{{"age":0,"health":-1,"summary":"Cried alone on the street."}}}}
 
-Player at depth 0 (street) says: "asdfghjkl"
-{{"intent":"reject","message":"You can't do that."}}
+Player at depth 0 (street) says: "Years pass, I grow up and become a teenager"
+{{"intent":"act","narrative":"Time slips by. Your body stretches. One day you look in a mirror and see a stranger — taller, sharper, no longer a child.","deltas":{{"age":10,"summary":"Grew from a child into a teenager."}}}}
 
-===== END EXAMPLES =====
+Player at depth 1 (restaurant) says: "I want to see the hospital"
+{{"intent":"reject","message":"You need to go back outside first."}}
 
 Now respond to the actual player.
 
@@ -202,12 +208,13 @@ CONVERSATION SO FAR (most recent last):
 PLAYER ({state.name}, age {state.age}, health {state.health}) says:
 "{player_text}"
 
-Respond in character. 1-3 sentences. Use *asterisks* for actions
-(e.g. *smiles*, *looks away*). Do NOT narrate the player's actions.
+Respond in character. 3-6 sentences. Use *asterisks* for physical actions
+and gestures. Give the NPC a distinct voice — a habit, a mood, a small
+physical detail. Do NOT narrate the player's actions or thoughts.
 
 Output JSON only:
 {{
-  "response": "<your words and actions as {npc['name']}>",
+  "response": "<3-6 sentences, your words and actions as {npc['name']}>",
   "deltas": {{"health": 0, "money": 0, "summary": "<short third-person event>"}}
 }}
 

@@ -1,4 +1,4 @@
-"""Draw rooms, walls, doors, objects, player, NPCs."""
+"""Draw rooms, walls, doors, objects, player (age-aware), NPCs."""
 import pygame
 
 from .constants import (
@@ -7,6 +7,50 @@ from .constants import (
     COLOR_DOOR, COLOR_DOOR_GLOW,
     COLOR_PLAYER, COLOR_PLAYER_RING,
 )
+from .assets import get_char_frame
+
+
+ANIM_FPS = 8.0
+
+
+def _age_size(age: int) -> int:
+    if age < 13:
+        return 30    # child
+    if age < 18:
+        return 40    # teen
+    if age < 60:
+        return 48    # adult
+    if age < 75:
+        return 46    # middle-age
+    if age < 90:
+        return 42    # elder
+    return 38        # ancient
+
+
+def _age_gray_amount(age: int) -> int:
+    """Alpha of the grayscale overlay (0 = no gray, 255 = fully gray)."""
+    if age < 60:
+        return 0
+    if age < 75:
+        return 55
+    if age < 90:
+        return 110
+    return 170
+
+
+def _apply_aging(sprite: pygame.Surface, age: int) -> pygame.Surface:
+    alpha = _age_gray_amount(age)
+    if alpha == 0:
+        return sprite
+    result = sprite.copy()
+    gray = pygame.Surface(result.get_size(), pygame.SRCALPHA)
+    try:
+        pygame.transform.grayscale(result, gray)
+    except Exception:
+        return sprite
+    gray.set_alpha(alpha)
+    result.blit(gray, (0, 0))
+    return result
 
 
 def draw_room(screen, room):
@@ -36,16 +80,23 @@ def draw_room(screen, room):
         pygame.draw.rect(screen, COLOR_WALL_EDGE, rect, 1)
 
 
-def draw_player(screen, player):
-    cx, cy = int(player.x), int(player.y)
-    pygame.draw.circle(screen, COLOR_PLAYER, (cx, cy), int(player.radius))
-    pygame.draw.circle(screen, COLOR_PLAYER_RING, (cx, cy), int(player.radius), 2)
-    pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 3)
+def draw_player(screen, player, age: int = 3):
+    if player.is_moving:
+        frame_idx = 1 + int(player.anim_timer * ANIM_FPS) % 4
+    else:
+        frame_idx = 0
+
+    size = _age_size(age)
+    sprite = get_char_frame(
+        player.sprite_id, player.facing, frame_idx, size,
+    )
+    sprite = _apply_aging(sprite, age)
+
+    rect = sprite.get_rect(center=(int(player.x), int(player.y)))
+    screen.blit(sprite, rect)
 
 
 def draw_npcs(screen, room, player=None, highlight_npc=None):
-    """Draw all NPCs in the room. Must be called AFTER draw_room and draw_player
-    is optional -- player is accepted for API consistency."""
     npcs = room.get("npcs", [])
     if not npcs:
         return
@@ -56,19 +107,12 @@ def draw_npcs(screen, room, player=None, highlight_npc=None):
         nx = npc["pos"][0] * TILE + TILE // 2
         ny = npc["pos"][1] * TILE + TILE // 2
 
-        # Shadow
         pygame.draw.circle(screen, (40, 40, 40), (nx + 1, ny + 2), 11)
-
-        # Body
         pygame.draw.circle(screen, tuple(npc["color"]), (nx, ny), 11)
-
-        # Outline
         pygame.draw.circle(screen, (30, 30, 30), (nx, ny), 11, 2)
 
-        # Highlight ring when the player is near
         if highlight_npc is not None and highlight_npc is npc:
             pygame.draw.circle(screen, (255, 230, 80), (nx, ny), 15, 2)
 
-        # First letter of name
         letter = font.render(npc["name"][:1].upper(), True, (20, 20, 20))
         screen.blit(letter, letter.get_rect(center=(nx, ny)))
