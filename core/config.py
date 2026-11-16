@@ -1,4 +1,4 @@
-"""Load config.yaml + .env into dataclasses."""
+"""Load config with priority: user_settings > config.yaml > env > defaults."""
 from __future__ import annotations
 
 import os
@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
+
+from .user_settings import load_user_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -44,45 +46,59 @@ class AppConfig:
     map2d: Map2DConfig
 
 
-def _resolve_api_key(raw: dict) -> str:
+def _env_api_key(raw: dict) -> str:
     env_name = raw.get("api_key_env", "GEMINI_API_KEY")
-    key = os.getenv(env_name, "").strip()
-    if not key:
-        raise ValueError(
-            f"API key not found. Set '{env_name}' in your .env file."
-        )
-    return key
+    return os.getenv(env_name, "").strip()
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     cfg_path = PROJECT_ROOT / path
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Config file not found: {cfg_path}")
-
-    with open(cfg_path, encoding="utf-8") as f:
-        raw: dict[str, Any] = yaml.safe_load(f) or {}
+    raw: dict[str, Any] = {}
+    if cfg_path.exists():
+        try:
+            raw = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
+        except Exception:
+            raw = {}
 
     llm_raw = raw.get("llm", {})
     game_raw = raw.get("game", {})
     map_raw = raw.get("map2d", {})
 
-    return AppConfig(
-        llm=LLMConfig(
-            base_url=llm_raw.get("base_url", "https://generativelanguage.googleapis.com/v1beta/openai/"),
-            api_key=_resolve_api_key(llm_raw),
-            model=llm_raw.get("model", "gemini-3.8-flash"),
-            temperature=llm_raw.get("temperature", 0.8),
-            max_tokens=llm_raw.get("max_tokens", 2000),
-            timeout=llm_raw.get("timeout", 60),
-        ),
-        game=GameConfig(
-            language=game_raw.get("language", "en"),
-            save_dir=game_raw.get("save_dir", "saves"),
-            max_history=game_raw.get("max_history", 20),
-            max_rooms=game_raw.get("max_rooms", 12),
-        ),
-        map2d=Map2DConfig(
-            tile_size=map_raw.get("tile_size", 32),
-            fps=map_raw.get("fps", 60),
-        ),
+    user = load_user_settings()
+    user_key = (user.get("api_key") or "").strip()
+
+    if user_key:
+        llm = LLMConfig(
+            base_url=user.get("base_url", "https://api.avalai.ir/v1"),
+            api_key=user_key,
+            model=user.get("model", "gpt-4o-mini"),
+            temperature=float(user.get("temperature", 0.8)),
+            max_tokens=int(user.get("max_tokens", 1500)),
+            timeout=int(user.get("timeout", 30)),
+        )
+    else:
+        llm = LLMConfig(
+            base_url=llm_raw.get(
+                "base_url",
+                "https://generativelanguage.googleapis.com/v1beta/openai/",
+            ),
+            api_key=_env_api_key(llm_raw),
+            model=llm_raw.get("model", "gemini-2.0-flash"),
+            temperature=float(llm_raw.get("temperature", 0.8)),
+            max_tokens=int(llm_raw.get("max_tokens", 2000)),
+            timeout=int(llm_raw.get("timeout", 60)),
+        )
+
+    game = GameConfig(
+        language=game_raw.get("language", "en"),
+        save_dir=game_raw.get("save_dir", "saves"),
+        max_history=int(game_raw.get("max_history", 20)),
+        max_rooms=int(game_raw.get("max_rooms", 12)),
     )
+
+    map2d = Map2DConfig(
+        tile_size=int(map_raw.get("tile_size", 32)),
+        fps=int(map_raw.get("fps", 60)),
+    )
+
+    return AppConfig(llm=llm, game=game, map2d=map2d)

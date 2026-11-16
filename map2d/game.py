@@ -1,4 +1,4 @@
-"""Main pygame loop with NPC support and threaded LLM calls."""
+"""Main pygame loop with NPC support, threaded LLM calls, held-backspace."""
 import sys
 import textwrap
 
@@ -26,7 +26,10 @@ INPUT_BOX_Y = WINDOW_H - INPUT_BOX_H - 8
 INPUT_BOX_X = 8
 INPUT_BOX_W = WINDOW_W - 16
 
-# Phases
+# Delete-repeat tuning
+BACKSPACE_INITIAL_DELAY = 0.35
+BACKSPACE_REPEAT_INTERVAL = 0.03
+
 P_BIRTH_LOADING = "birth_loading"
 P_BIRTH_OVERLAY = "birth_overlay"
 P_IDLE = "idle"
@@ -38,8 +41,9 @@ P_DIALOGUE = "dialogue"
 P_DIALOGUE_THINKING = "dialogue_thinking"
 
 
-def run():
-    cfg = load_config()
+def run(cfg=None):
+    if cfg is None:
+        cfg = load_config()
     llm = LLMClient(cfg.llm)
 
     pygame.init()
@@ -52,7 +56,6 @@ def run():
     font_overlay = pygame.font.SysFont("Arial", 14)
     font_center = pygame.font.SysFont("Arial", 16, bold=True)
 
-    # ---------- Character setup ----------
     profile = generate_character()
     state = GameState(
         country=profile["country"],
@@ -69,13 +72,11 @@ def run():
     player = Player(sx, sy)
     last_tile = player.center_tile()
 
-    # ---------- Background tasks ----------
     birth_task = LLMTask()
     turn_task = LLMTask()
     npc_task = LLMTask()
     birth_task.start(parse_birth, llm, state)
 
-    # ---------- Runtime state ----------
     phase = P_BIRTH_LOADING
     overlay_text = ""
     overlay_can_dismiss_at = 0.0
@@ -90,6 +91,8 @@ def run():
     current_npc = None
     _pending_phase = [P_IDLE]
     _pending_overlay = [""]
+    backspace_hold_started = None
+    backspace_last_tick = 0.0
     running = True
 
     while running:
@@ -101,6 +104,13 @@ def run():
             if event.type == pygame.QUIT:
                 running = False
                 break
+
+            # Clear backspace hold on release
+            if event.type == pygame.KEYUP:
+                if event.key == pygame.K_BACKSPACE:
+                    backspace_hold_started = None
+                continue
+
             if event.type != pygame.KEYDOWN:
                 continue
 
@@ -127,7 +137,7 @@ def run():
                     phase = P_BIRTH_OVERLAY
                 continue
 
-            # ----- Thinking (turn) -----
+            # ----- Thinking -----
             if phase == P_THINKING:
                 if event.key == pygame.K_ESCAPE:
                     message = "Please wait for the response..."
@@ -154,6 +164,8 @@ def run():
                     continue
                 if event.key == pygame.K_BACKSPACE:
                     text_buffer = text_buffer[:-1]
+                    backspace_hold_started = now
+                    backspace_last_tick = now
                     continue
                 if event.unicode and event.unicode.isprintable():
                     if len(text_buffer) < 120:
@@ -176,7 +188,6 @@ def run():
                     running = False
                 continue
 
-            # E to talk to nearby NPC
             if event.key == pygame.K_e and not typing:
                 near = nearest_npc(player, world.current.get("npcs", []))
                 if near:
@@ -212,6 +223,8 @@ def run():
 
             if typing and event.key == pygame.K_BACKSPACE:
                 text_buffer = text_buffer[:-1]
+                backspace_hold_started = now
+                backspace_last_tick = now
                 continue
 
             if typing and event.unicode and event.unicode.isprintable():
@@ -221,12 +234,20 @@ def run():
         if not running:
             break
 
+        # ================= BACKSPACE HOLD REPEAT =================
+        if backspace_hold_started is not None:
+            elapsed = now - backspace_hold_started
+            if elapsed > BACKSPACE_INITIAL_DELAY:
+                if now - backspace_last_tick >= BACKSPACE_REPEAT_INTERVAL:
+                    if (phase == P_DIALOGUE) or (phase == P_IDLE and typing):
+                        text_buffer = text_buffer[:-1]
+                    backspace_last_tick = now
+
         # ================= TASKS =================
         birth_task.update()
         turn_task.update()
         npc_task.update()
 
-        # ----- Birth done -----
         if phase == P_BIRTH_LOADING and birth_task.is_done():
             if birth_task.timed_out or birth_task.error:
                 state.name = "Alex"
@@ -246,7 +267,6 @@ def run():
             overlay_can_dismiss_at = now + 0.4
             phase = P_BIRTH_OVERLAY
 
-        # ----- Turn done -----
         elif phase == P_THINKING and turn_task.is_done():
             _apply_turn_result(turn_task, world, state, cfg, _pending_phase, _pending_overlay)
             message = world.last_message
@@ -258,7 +278,6 @@ def run():
             else:
                 phase = P_IDLE
 
-        # ----- NPC reply done -----
         elif phase == P_DIALOGUE_THINKING and npc_task.is_done():
             if npc_task.timed_out or npc_task.error:
                 push_log(current_npc, "npc", "...")
@@ -274,7 +293,6 @@ def run():
                     push_log(current_npc, "npc", "...")
             phase = P_DIALOGUE
 
-        # ----- Death check -----
         if not state.alive and not death_shown and phase == P_IDLE:
             death_shown = True
             overlay_text = (
@@ -352,13 +370,9 @@ def run():
 
         pygame.display.flip()
 
-    pygame.quit()
-    sys.exit()
+    return
 
 
-# =============================================================
-# Turn result
-# =============================================================
 def _apply_turn_result(task, world, state, cfg, pending_phase, pending_overlay):
     pending_phase[0] = P_IDLE
     pending_overlay[0] = ""
@@ -420,9 +434,6 @@ def _apply_turn_result(task, world, state, cfg, pending_phase, pending_overlay):
     world.last_message_color = COLOR_MSG_WARN
 
 
-# =============================================================
-# Draw helpers
-# =============================================================
 def _draw_game(screen, world, player, state, font_big, font_sm, font_input,
                message, message_color, typing, text_buffer, near_npc):
     screen.fill(COLOR_HUD_BG)

@@ -1,5 +1,8 @@
-"""Entry point: launches the 2D game."""
-from map2d.game import run
+"""Entry point."""
+from __future__ import annotations
+
+from map2d.app import run_app
+
 
 if __name__ == "__main__":
-    run()
+    run_app()
