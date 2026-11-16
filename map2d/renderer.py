@@ -1,4 +1,4 @@
-"""Draw rooms, walls, doors, objects, player."""
+"""Draw rooms, walls, doors, objects, player, NPCs."""
 import pygame
 
 from .constants import (
@@ -41,3 +41,34 @@ def draw_player(screen, player):
     pygame.draw.circle(screen, COLOR_PLAYER, (cx, cy), int(player.radius))
     pygame.draw.circle(screen, COLOR_PLAYER_RING, (cx, cy), int(player.radius), 2)
     pygame.draw.circle(screen, (255, 255, 255), (cx, cy), 3)
+
+
+def draw_npcs(screen, room, player=None, highlight_npc=None):
+    """Draw all NPCs in the room. Must be called AFTER draw_room and draw_player
+    is optional -- player is accepted for API consistency."""
+    npcs = room.get("npcs", [])
+    if not npcs:
+        return
+
+    font = pygame.font.SysFont("Arial", 12, bold=True)
+
+    for npc in npcs:
+        nx = npc["pos"][0] * TILE + TILE // 2
+        ny = npc["pos"][1] * TILE + TILE // 2
+
+        # Shadow
+        pygame.draw.circle(screen, (40, 40, 40), (nx + 1, ny + 2), 11)
+
+        # Body
+        pygame.draw.circle(screen, tuple(npc["color"]), (nx, ny), 11)
+
+        # Outline
+        pygame.draw.circle(screen, (30, 30, 30), (nx, ny), 11, 2)
+
+        # Highlight ring when the player is near
+        if highlight_npc is not None and highlight_npc is npc:
+            pygame.draw.circle(screen, (255, 230, 80), (nx, ny), 15, 2)
+
+        # First letter of name
+        letter = font.render(npc["name"][:1].upper(), True, (20, 20, 20))
+        screen.blit(letter, letter.get_rect(center=(nx, ny)))

@@ -35,6 +35,7 @@ def build_room(spec, room_id, depth):
         "walls": walls,
         "parsed_doors": parsed_doors,
         "objects": objects,
+        "npcs": list(spec.get("npcs", [])),
         "player_spawn": spec["spawn"],
         "label": spec["label"],
         "depth": depth,

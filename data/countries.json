@@ -1,0 +1,22 @@
+{
+  "countries": [
+    {"name": "Iran", "region": "Middle East"},
+    {"name": "Japan", "region": "East Asia"},
+    {"name": "United States", "region": "North America"},
+    {"name": "Brazil", "region": "South America"},
+    {"name": "Egypt", "region": "North Africa"},
+    {"name": "Germany", "region": "Western Europe"},
+    {"name": "India", "region": "South Asia"},
+    {"name": "Nigeria", "region": "West Africa"},
+    {"name": "Mexico", "region": "North America"},
+    {"name": "South Korea", "region": "East Asia"},
+    {"name": "Turkey", "region": "Middle East"},
+    {"name": "Kenya", "region": "East Africa"},
+    {"name": "France", "region": "Western Europe"},
+    {"name": "China", "region": "East Asia"},
+    {"name": "United Kingdom", "region": "Western Europe"},
+    {"name": "Italy", "region": "Western Europe"},
+    {"name": "Spain", "region": "Western Europe"},
+    {"name": "Canada", "region": "North America"}
+  ]
+}

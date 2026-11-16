@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .object_types import OBJECT_TYPES
+from .npc import validate_npcs, default_npc_for_room
 
 ROOM_W, ROOM_H = 15, 10
 DEFAULT_FLOOR = (210, 200, 190)
@@ -33,7 +34,6 @@ def validate_room_spec(spec, door_side):
     door_tile = door_tile_for_side(door_side, w, h)
 
     occupied = {(sx, sy), door_tile}
-    # Block a 3-wide, 3-deep corridor from the door's inside
     if door_side == "north":
         for dy in range(1, 4):
             for dx in range(-1, 2):
@@ -70,8 +70,8 @@ def validate_room_spec(spec, door_side):
             ox, oy = int(obj.get("x")), int(obj.get("y"))
         except (TypeError, ValueError):
             continue
-        if not (1 <= ox <= w - 2 and 1 <= oy <= h - 2):
-            continue
+        ox = max(1, min(ox, w - 2))
+        oy = max(1, min(oy, h - 2))
         if (ox, oy) in occupied:
             continue
         occupied.add((ox, oy))
@@ -81,6 +81,15 @@ def validate_room_spec(spec, door_side):
             "color": OBJECT_TYPES[otype],
         })
 
+    # NPCs: use LLM's list, clamp positions, fall back to a default if empty
+    npcs = validate_npcs(spec.get("npcs", []), w, h)
+    for npc in npcs:
+        occupied.add(npc["pos"])
+    if not npcs:
+        npcs = default_npc_for_room(
+            str(spec.get("label", "Room")), w, h, occupied
+        )
+
     return {
         "size": (w, h),
         "floor_color": floor,
@@ -89,6 +98,7 @@ def validate_room_spec(spec, door_side):
         "door_side": door_side,
         "door_tile": door_tile,
         "objects": objects,
+        "npcs": npcs,
         "label": str(spec.get("label", "Room"))[:40],
     }
 
@@ -112,6 +122,7 @@ def fallback_room_spec(label, door_side):
                 {"type": "chair", "x": 3, "y": 3},
                 {"type": "plant", "x": 11, "y": 3},
             ],
+            "npcs": [],
             "label": label,
         },
         door_side,

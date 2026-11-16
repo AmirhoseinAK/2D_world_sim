@@ -59,13 +59,11 @@ class World:
     def free_directions(self):
         return sorted(set(OPPOSITE.keys()) - set(self.occupied_directions()))
 
-    def add_door(self, direction: str, room_spec: dict, label: str):
+    def add_door(self, direction: str, room_spec: dict, label: str, entry_narrative: str = ""):
         if not self.can_add_door():
             return None, "You can't go any deeper from here. Go back first."
-
         if direction not in OPPOSITE:
             return None, "Invalid direction."
-
         pos = self._find_free_wall(self.current_id, direction)
         if pos is None:
             return None, "No space for a new door there."
@@ -93,12 +91,16 @@ class World:
             "target": room_id,
             "spawn_at": spawn_in_new,
             "label": label,
+            "entry_narrative": entry_narrative or "",
+            "entry_narrated": False,
         }
 
         room["parsed_doors"][ret_tile] = {
             "target": self.current_id,
             "spawn_at": pos,
             "label": f"Back to {self.current_label()}",
+            "entry_narrative": "",
+            "entry_narrated": True,
         }
 
         return pos, None
@@ -120,6 +122,7 @@ class World:
         room.setdefault("floor_color", DEFAULT_FLOOR)
         room.setdefault("wall_color", DEFAULT_WALL)
         room["player_spawn"] = template["player_spawn"]
+        room.setdefault("npcs", [])
         room.setdefault("depth", 0)
         room.setdefault("label", room_id.replace("_", " ").title())
         return room
